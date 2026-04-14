@@ -12,10 +12,15 @@ const sendResponse = (res, statusCode, data = {}, message = null) => {
   return res.status(statusCode).json(response);
 };
 
-// Pagination helper
-const getPagination = (page = 1, limit = 10) => {
-  const skip = (page - 1) * limit;
-  return { skip, limit: parseInt(limit) };
+/**
+ * Pagination helper — accepts the full req.query object.
+ * Usage: const { page, limit, skip } = getPagination(req.query);
+ */
+const getPagination = (query = {}) => {
+  const page  = Math.max(1, parseInt(query.page)  || 1);
+  const limit = Math.min(500, Math.max(1, parseInt(query.limit) || 20));
+  const skip  = (page - 1) * limit;
+  return { page, limit, skip };
 };
 
 // Pagination metadata
@@ -38,9 +43,9 @@ const generateSKU = (category, index) => {
     fertilizers: 'FRT',
     pesticides: 'PST',
     veterinary: 'VET',
-    tools: 'TLS'
+    tools: 'TLS',
   };
-  return `${prefix[category]}-${String(index).padStart(4, '0')}`;
+  return `${prefix[category] || 'PRD'}-${String(index).padStart(4, '0')}`;
 };
 
 module.exports = {

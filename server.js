@@ -27,9 +27,27 @@ connectDB();
 // ── Security Middleware ───────────────────────────────────────────────────────
 app.use(helmet());
 
+// Allow multiple origins: dev frontend (8080/5173) + any configured CLIENT_URL
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:8080',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:8080',
+];
+if (process.env.CLIENT_URL) {
+  // CLIENT_URL may be a comma-separated list or single value
+  process.env.CLIENT_URL.split(',').forEach((u) => allowedOrigins.push(u.trim()));
+}
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || 'http://localhost:5173 || http://localhost:8080',
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, curl, Postman)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin ${origin} not allowed`));
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -91,19 +109,14 @@ app.use(errorHandler);
 // ── Start Server ──────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
 const server = app.listen(PORT, async () => {
-  console.log('\n🌿 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log(`   Agrovet POS Backend`);
+  console.log(`   Tiana Agrovet Backend`);
   console.log(`   Running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
-  console.log('   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
   // Verify email service
   await verifyEmailConnection();
 
   // Start cron scheduler
   initScheduler();
-
-  console.log(`   API: http://localhost:${PORT}/api`);
-  console.log('🌿 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 });
 
 // ── Graceful Shutdown ─────────────────────────────────────────────────────────

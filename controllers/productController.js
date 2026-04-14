@@ -29,8 +29,6 @@ const getProducts = asyncHandler(async (req, res) => {
     query.expiryDate = { $lt: new Date() };
   }
 
-  // Exclude products with empty supplierId to avoid ObjectId casting errors
-  query.supplierId = { $ne: '' };
 
   const [products, total] = await Promise.all([
     Product.find(query)

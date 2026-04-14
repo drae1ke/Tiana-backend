@@ -1,56 +1,55 @@
-import Transaction from '../models/Transaction.js';
-import Sale from '../models/Sale.js';
-import Product from '../models/Product.js';
-import { initiateStkPush } from '../utils/mpesa.js';
+/**
+ * controllers/mpesaController.js  (CommonJS)
+ *
+ * Endpoints:
+ *   POST /api/mpesa/stk-push       → initiate payment from POS
+ *   POST /api/mpesa/stk-callback   → Safaricom callback (stock deduction happens here)
+ *   GET  /api/mpesa/transaction/:id → query transaction status
+ */
 
-// 1. Initiate STK Push (POS terminal)
-export const stkPush = async (req, res) => {
+const Transaction = require('../models/Transaction');
+const Sale        = require('../models/Sale');
+const Product     = require('../models/Product');
+const { initiateStkPush } = require('../utils/mpesa');
+
+// ── POST /api/mpesa/stk-push ──────────────────────────────────────────────────
+const stkPush = async (req, res) => {
   try {
     const { amount, phoneNumber, saleId } = req.body;
 
     if (!amount || !phoneNumber || !saleId) {
-      return res.status(400).json({ error: 'Amount, phoneNumber, and saleId are required' });
+      return res.status(400).json({ error: 'amount, phoneNumber and saleId are required' });
     }
 
-    // Verify sale exists and is pending
     const sale = await Sale.findById(saleId);
-    if (!sale) {
-      return res.status(404).json({ error: 'Sale not found' });
-    }
-    if (sale.status !== 'pending') {
-      return res.status(400).json({ error: 'Sale is not in pending status' });
-    }
-    if (sale.total !== amount) {
-      return res.status(400).json({ error: 'Amount does not match sale total' });
-    }
+    if (!sale)                      return res.status(404).json({ error: 'Sale not found' });
+    if (sale.status !== 'pending')  return res.status(400).json({ error: 'Sale is not pending' });
+    if (sale.total !== Number(amount)) return res.status(400).json({ error: 'Amount does not match sale total' });
 
-    // Create a pending transaction record linked to the sale
-    const transaction = new Transaction({
-      checkoutRequestId: `CHECKOUT_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    // Create tracking transaction
+    const checkoutRequestId = `CHECKOUT_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const transaction = await Transaction.create({
+      checkoutRequestId,
       amount,
       phoneNumber,
       status: 'pending',
     });
-    await transaction.save();
 
-    // Update sale with transaction reference
     sale.transactionId = transaction._id;
     await sale.save();
 
-    // Send STK push to customer's phone
-    const stkResponse = await initiateStkPush(amount, phoneNumber, transaction.checkoutRequestId);
+    const stkResponse = await initiateStkPush(amount, phoneNumber, 'AgrovetPOS');
 
-    // If Safaricom returns a CheckoutRequestID, update our record
-    if (stkResponse.CheckoutRequestID) {
+    if (stkResponse.CheckoutRequestID && stkResponse.CheckoutRequestID !== checkoutRequestId) {
       transaction.checkoutRequestId = stkResponse.CheckoutRequestID;
       await transaction.save();
     }
 
     res.json({
-      message: 'STK push sent successfully',
+      message:           'STK push sent successfully',
       checkoutRequestId: transaction.checkoutRequestId,
-      responseCode: stkResponse.ResponseCode,
-      responseDesc: stkResponse.ResponseDescription,
+      responseCode:      stkResponse.ResponseCode,
+      responseDesc:      stkResponse.ResponseDescription,
     });
   } catch (error) {
     console.error('STK Push error:', error.response?.data || error.message);
@@ -58,107 +57,98 @@ export const stkPush = async (req, res) => {
   }
 };
 
-// 2. STK Push Callback (called by Safaricom)
-export const stkCallback = async (req, res) => {
-  const callback = req.body?.Body?.stkCallback;
+// ── POST /api/mpesa/stk-callback ──────────────────────────────────────────────
+// Called by Safaricom — must always return 200 quickly.
+const stkCallback = async (req, res) => {
+  // Acknowledge immediately so Safaricom doesn't retry
+  res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
 
-  if (!callback) {
-    return res.status(400).json({ error: 'Invalid callback payload' });
-  }
+  const callback = req.body?.Body?.stkCallback;
+  if (!callback) return;
 
   const { CheckoutRequestID, ResultCode, ResultDesc, CallbackMetadata } = callback;
 
   try {
-    // Find the MPesa Transaction record
     const transaction = await Transaction.findOne({ checkoutRequestId: CheckoutRequestID });
     if (!transaction) {
-      console.warn(`Transaction not found for CheckoutRequestID: ${CheckoutRequestID}`);
-      return res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
+      console.warn(`[MPesa callback] Transaction not found for ${CheckoutRequestID}`);
+      return;
     }
 
     if (ResultCode === 0) {
-      // Payment successful
+      // ── Payment successful ─────────────────────────────────────────────────
       const items = CallbackMetadata?.Item || [];
-      const get = (name) => items.find((i) => i.Name === name)?.Value;
+      const get   = (name) => items.find((i) => i.Name === name)?.Value;
 
-      transaction.status = 'paid';
-      transaction.receiptNumber = get('MpesaReceiptNumber');
-      transaction.transactionDate = get('TransactionDate');
+      transaction.status          = 'paid';
+      transaction.receiptNumber   = get('MpesaReceiptNumber');
+      transaction.transactionDate = String(get('TransactionDate') || '');
       transaction.mpesaResultCode = ResultCode;
       await transaction.save();
 
-      // Find the linked Sale and complete it
       const sale = await Sale.findOne({ transactionId: transaction._id });
       if (sale && sale.status === 'pending') {
-        // Update sale status
-        sale.status = 'completed';
-        sale.mpesaRef = transaction.receiptNumber; // optional: store receipt as mpesaRef
-        await sale.save();
-
-        // Deduct stock for each product in the sale
+        // Deduct stock atomically with BulkWrite
         const bulkOps = sale.items.map((item) => ({
           updateOne: {
-            filter: { _id: item.productId },
+            filter: { _id: item.productId, quantity: { $gte: item.quantity } },
             update: { $inc: { quantity: -item.quantity } },
           },
         }));
-        await Product.bulkWrite(bulkOps);
 
-        console.log(`✅ Sale ${sale._id} completed after MPesa payment, stock deducted.`);
-      } else {
-        console.warn(`Sale not found or already completed for transaction ${transaction._id}`);
+        const bulkResult = await Product.bulkWrite(bulkOps, { ordered: false });
+
+        sale.status   = 'completed';
+        sale.mpesaRef = transaction.receiptNumber;
+        await sale.save();
+
+        console.log(
+          `[MPesa callback] Sale ${sale._id} completed. ` +
+          `Receipt: ${transaction.receiptNumber}. ` +
+          `Stock deducted for ${bulkResult.modifiedCount}/${sale.items.length} items.`
+        );
       }
-
-      console.log(`✅ Payment completed: ${transaction.receiptNumber} for KES ${transaction.amount}`);
     } else {
-      // Payment failed
-      transaction.status = 'failed';
-      transaction.failureReason = ResultDesc;
+      // ── Payment failed ─────────────────────────────────────────────────────
+      transaction.status          = 'failed';
+      transaction.failureReason   = ResultDesc;
       transaction.mpesaResultCode = ResultCode;
       await transaction.save();
 
-      // Optionally mark the linked Sale as cancelled
       const sale = await Sale.findOne({ transactionId: transaction._id });
       if (sale && sale.status === 'pending') {
-        sale.status = 'cancelled';
+        sale.status   = 'cancelled';
         sale.mpesaRef = `FAILED: ${ResultDesc}`;
         await sale.save();
-        console.warn(`❌ Sale ${sale._id} cancelled due to MPesa failure: ${ResultDesc}`);
+        console.warn(`[MPesa callback] Sale ${sale._id} cancelled. Reason: ${ResultDesc}`);
       }
-
-      console.warn(`❌ Payment failed [${ResultCode}]: ${ResultDesc} - ${CheckoutRequestID}`);
     }
-
-    res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
   } catch (error) {
-    console.error('Callback processing error:', error);
-    res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
+    console.error('[MPesa callback] Processing error:', error.message);
   }
 };
-// 3. Get transaction status (optional)
-export const getTransactionStatus = async (req, res) => {
-  try {
-    const transaction = await Transaction.findOne({ checkoutRequestId: req.params.checkoutRequestId })
-      .populate('saleId');
-    
-    if (!transaction) {
-      return res.status(404).json({ error: 'Transaction not found' });
-    }
 
-    // Also get the related sale
+// ── GET /api/mpesa/transaction/:checkoutRequestId ─────────────────────────────
+const getTransactionStatus = async (req, res) => {
+  try {
+    const transaction = await Transaction.findOne({
+      checkoutRequestId: req.params.checkoutRequestId,
+    });
+
+    if (!transaction) return res.status(404).json({ error: 'Transaction not found' });
+
     const sale = await Sale.findOne({ transactionId: transaction._id });
 
     res.json({
       transaction,
-      sale: sale ? {
-        _id: sale._id,
-        status: sale.status,
-        total: sale.total,
-        items: sale.items.length
-      } : null
+      sale: sale
+        ? { _id: sale._id, status: sale.status, total: sale.total, itemCount: sale.items.length }
+        : null,
     });
   } catch (error) {
     console.error('Error fetching transaction status:', error);
     res.status(500).json({ error: 'Failed to fetch transaction status' });
   }
 };
+
+module.exports = { stkPush, stkCallback, getTransactionStatus };
