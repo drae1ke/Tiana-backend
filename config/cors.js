@@ -3,7 +3,8 @@ const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:5000',
     'http://localhost:5173',
-    'https://yourdomain.com'
+    'https://tianapos.netlify.app/',
+    'https://tiana-backend.onrender.com'
 ];
 
 const cors = {
