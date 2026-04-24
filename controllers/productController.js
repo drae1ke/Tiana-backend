@@ -2,6 +2,17 @@ const Product = require('../models/Product');
 const { asyncHandler, sendResponse, getPagination, paginationMeta } = require('../utils/helpers');
 const { resetAlertFlagsOnRestock } = require('../utils/scheduler');
 
+const normalizeSku = (sku) => String(sku || '').trim().toUpperCase();
+
+const findProductBySku = (sku, excludeId = null) => {
+  if (!sku) return null;
+
+  const query = { sku: normalizeSku(sku) };
+  if (excludeId) query._id = { $ne: excludeId };
+
+  return Product.findOne(query).select('name sku isActive');
+};
+
 // GET /api/products
 const getProducts = asyncHandler(async (req, res) => {
   const { page, limit, skip } = getPagination(req.query);
@@ -59,6 +70,18 @@ const getProduct = asyncHandler(async (req, res) => {
 
 // POST /api/products
 const createProduct = asyncHandler(async (req, res) => {
+  if (req.body.sku) {
+    req.body.sku = normalizeSku(req.body.sku);
+    const existingProduct = await findProductBySku(req.body.sku);
+
+    if (existingProduct) {
+      return res.status(409).json({
+        success: false,
+        message: `SKU "${req.body.sku}" is already in use by "${existingProduct.name}".`,
+      });
+    }
+  }
+
   const product = await Product.create(req.body);
   const populated = await product.populate('supplierId', 'name phone');
   sendResponse(res, 201, { data: populated }, 'Product created successfully');
@@ -66,6 +89,18 @@ const createProduct = asyncHandler(async (req, res) => {
 
 // PUT /api/products/:id
 const updateProduct = asyncHandler(async (req, res) => {
+  if (req.body.sku) {
+    req.body.sku = normalizeSku(req.body.sku);
+    const existingProduct = await findProductBySku(req.body.sku, req.params.id);
+
+    if (existingProduct) {
+      return res.status(409).json({
+        success: false,
+        message: `SKU "${req.body.sku}" is already in use by "${existingProduct.name}".`,
+      });
+    }
+  }
+
   const product = await Product.findOneAndUpdate(
     { _id: req.params.id, isActive: true },
     req.body,
