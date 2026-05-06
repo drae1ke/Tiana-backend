@@ -1,18 +1,11 @@
-/**
- * controllers/mpesaController.js  (CommonJS)
- *
- * Endpoints:
- *   POST /api/mpesa/stk-push       → initiate payment from POS
- *   POST /api/mpesa/stk-callback   → Safaricom callback (stock deduction happens here)
- *   GET  /api/mpesa/transaction/:id → query transaction status
- */
+
 
 const Transaction = require('../models/Transaction');
 const Sale        = require('../models/Sale');
 const Product     = require('../models/Product');
 const { initiateStkPush } = require('../utils/mpesa');
 
-// ── POST /api/mpesa/stk-push ──────────────────────────────────────────────────
+
 const stkPush = async (req, res) => {
   try {
     const { amount, phoneNumber, saleId } = req.body;
@@ -57,10 +50,10 @@ const stkPush = async (req, res) => {
   }
 };
 
-// ── POST /api/mpesa/stk-callback ──────────────────────────────────────────────
 // Called by Safaricom — must always return 200 quickly.
+
 const stkCallback = async (req, res) => {
-  // Acknowledge immediately so Safaricom doesn't retry
+
   res.status(200).json({ ResultCode: 0, ResultDesc: 'Accepted' });
 
   const callback = req.body?.Body?.stkCallback;

@@ -12,10 +12,7 @@ const sendResponse = (res, statusCode, data = {}, message = null) => {
   return res.status(statusCode).json(response);
 };
 
-/**
- * Pagination helper — accepts the full req.query object.
- * Usage: const { page, limit, skip } = getPagination(req.query);
- */
+
 const getPagination = (query = {}) => {
   const page  = Math.max(1, parseInt(query.page)  || 1);
   const limit = Math.min(500, Math.max(1, parseInt(query.limit) || 20));
@@ -23,7 +20,7 @@ const getPagination = (query = {}) => {
   return { page, limit, skip };
 };
 
-// Pagination metadata
+
 const paginationMeta = (total, page, limit) => {
   const totalPages = Math.ceil(total / limit);
   return {
@@ -36,7 +33,7 @@ const paginationMeta = (total, page, limit) => {
   };
 };
 
-// Generate SKU for products
+
 const generateSKU = (category, index) => {
   const prefix = {
     seeds: 'SED',
