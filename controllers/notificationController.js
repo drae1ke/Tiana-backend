@@ -34,7 +34,8 @@ const getAlerts = asyncHandler(async (req, res) => {
 
 // POST /api/notifications/send-low-stock
 const sendLowStockEmailNow = asyncHandler(async (req, res) => {
-  const products = await Product.find({ isActive: true, $expr: { $lte: ['$quantity', '$minStockLevel'] } });
+  const products = await Product.find({ isActive: true, $expr: { $lte: ['$quantity', '$minStockLevel'] } })
+    .populate('supplierId');
   if (!products.length) return sendResponse(res, 200, {}, 'No low stock products. Email not sent.');
   await sendLowStockAlert(products);
   sendResponse(res, 200, { data: { count: products.length } }, 'Low stock alert sent successfully');

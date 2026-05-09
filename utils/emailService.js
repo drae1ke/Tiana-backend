@@ -171,10 +171,33 @@ const sendEmail = async ({ to, subject, html }) => {
   return info;
 };
 
+const addRecipient = (recipients, email) => {
+  const normalized = String(email || '').trim();
+  if (normalized && !recipients.includes(normalized)) {
+    recipients.push(normalized);
+  }
+};
+
+const buildAlertRecipients = (products = []) => {
+  const recipients = [];
+  addRecipient(recipients, process.env.ALERT_EMAIL);
+
+  for (const product of products) {
+    addRecipient(recipients, product?.supplierId?.email);
+  }
+
+  if (!recipients.length) {
+    throw new Error('No recipient email configured (set ALERT_EMAIL or ensure low stock products have suppliers with email addresses).');
+  }
+
+  return recipients;
+};
+
 const sendLowStockAlert = async (products) => {
   if (!products.length) return null;
   const { subject, html } = lowStockEmailTemplate(products);
-  return sendEmail({ to: process.env.ALERT_EMAIL, subject, html });
+  const recipients = buildAlertRecipients(products);
+  return sendEmail({ to: recipients.join(','), subject, html });
 };
 
 const sendExpiryAlert = async (products) => {
@@ -185,9 +208,16 @@ const sendExpiryAlert = async (products) => {
 
 const sendAutoOrderEmail = async (order, supplier) => {
   const { subject, html } = autoOrderEmailTemplate(order, supplier);
-  // Send to both alert email and supplier email (if available)
-  const recipients = [process.env.ALERT_EMAIL];
-  if (supplier.email) recipients.push(supplier.email);
+
+  // Build recipients safely (ignore empty env / empty supplier email)
+  const recipients = [];
+  addRecipient(recipients, process.env.ALERT_EMAIL);
+  addRecipient(recipients, supplier?.email);
+
+  if (!recipients.length) {
+    throw new Error('No recipient email configured (set ALERT_EMAIL or ensure supplier.email is set).');
+  }
+
   return sendEmail({ to: recipients.join(','), subject, html });
 };
 
