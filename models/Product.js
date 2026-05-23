@@ -55,6 +55,12 @@ const productSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    imageUrl: {
+      type: String,
+      trim: true,
+      maxlength: [3000000, 'Image data is too large'],
+      default: '',
+    },
     supplierId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Supplier',

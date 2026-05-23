@@ -10,7 +10,7 @@ const {
   restockProduct,
 } = require('../controllers/productController');
 const { protect, authorize } = require('../middleware/auth');
-const { productValidation, mongoIdParam } = require('../middleware/validation');
+const { productValidation, restockValidation, mongoIdParam } = require('../middleware/validation');
 
 router.use(protect);
 
@@ -28,6 +28,6 @@ router.route('/:id')
   .delete(authorize('admin'), ...mongoIdParam('id'), deleteProduct);
 
 // Restock endpoint
-router.patch('/:id/restock', authorize('admin', 'manager'), ...mongoIdParam('id'), restockProduct);
+router.patch('/:id/restock', authorize('admin', 'manager'), ...mongoIdParam('id'), restockValidation, restockProduct);
 
 module.exports = router;

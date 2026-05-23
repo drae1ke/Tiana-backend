@@ -193,6 +193,17 @@ const buildAlertRecipients = (products = []) => {
   return recipients;
 };
 
+const buildExpiryRecipients = () => {
+  const recipients = [];
+  addRecipient(recipients, process.env.ALERT_EMAIL);
+
+  if (!recipients.length) {
+    throw new Error('No recipient email configured (set ALERT_EMAIL to receive expiry alerts).');
+  }
+
+  return recipients;
+};
+
 const sendLowStockAlert = async (products) => {
   if (!products.length) return null;
   const { subject, html } = lowStockEmailTemplate(products);
@@ -203,7 +214,8 @@ const sendLowStockAlert = async (products) => {
 const sendExpiryAlert = async (products) => {
   if (!products.length) return null;
   const { subject, html } = expiryAlertEmailTemplate(products);
-  return sendEmail({ to: process.env.ALERT_EMAIL, subject, html });
+  const recipients = buildExpiryRecipients();
+  return sendEmail({ to: recipients.join(','), subject, html });
 };
 
 const sendAutoOrderEmail = async (order, supplier) => {

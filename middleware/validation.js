@@ -1,5 +1,9 @@
 const { body, param, query, validationResult } = require('express-validator');
 
+const MAX_INLINE_IMAGE_LENGTH = 3_000_000;
+const HTTP_IMAGE_PATTERN = /^https?:\/\/\S+$/i;
+const DATA_IMAGE_PATTERN = /^data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+$/i;
+
 // Middleware to handle validation results
 const validate = (req, res, next) => {
   const errors = validationResult(req);
@@ -12,6 +16,29 @@ const validate = (req, res, next) => {
   }
   next();
 };
+
+const imageValidation = body('imageUrl')
+  .optional({ nullable: true })
+  .customSanitizer((value) => (typeof value === 'string' ? value.trim() : value))
+  .custom((value) => {
+    if (value === undefined || value === null || value === '') {
+      return true;
+    }
+
+    if (typeof value !== 'string') {
+      throw new Error('Image must be a string');
+    }
+
+    if (value.length > MAX_INLINE_IMAGE_LENGTH) {
+      throw new Error('Image is too large');
+    }
+
+    if (HTTP_IMAGE_PATTERN.test(value) || DATA_IMAGE_PATTERN.test(value)) {
+      return true;
+    }
+
+    throw new Error('Image must be a valid URL or base64 image');
+  });
 
 // Auth validations
 const loginValidation = [
@@ -40,6 +67,15 @@ const productValidation = [
   body('buyingPrice').isFloat({ min: 0 }).withMessage('Buying price must be a non-negative number'),
   body('sellingPrice').isFloat({ min: 0 }).withMessage('Selling price must be a non-negative number'),
   body('expiryDate').optional({ nullable: true }).isISO8601().withMessage('Invalid expiry date format'),
+  imageValidation,
+  validate,
+];
+
+const restockValidation = [
+  body('quantity').isInt({ min: 1 }).withMessage('Quantity must be at least 1'),
+  body('batchNumber').optional({ nullable: true }).isString().withMessage('Batch number must be text'),
+  body('expiryDate').optional({ nullable: true }).isISO8601().withMessage('Invalid expiry date format'),
+  imageValidation,
   validate,
 ];
 
@@ -77,6 +113,7 @@ module.exports = {
   productValidation,
   supplierValidation,
   saleValidation,
+  restockValidation,
   mongoIdParam,
   validate,
 };

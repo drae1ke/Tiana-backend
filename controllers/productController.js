@@ -3,6 +3,7 @@ const { asyncHandler, sendResponse, getPagination, paginationMeta } = require('.
 const { resetAlertFlagsOnRestock } = require('../utils/scheduler');
 
 const normalizeSku = (sku) => String(sku || '').trim().toUpperCase();
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 const findProductBySku = (sku, excludeId = null) => {
   if (!sku) return null;
@@ -171,7 +172,7 @@ const getDashboardStats = asyncHandler(async (req, res) => {
 
 // PATCH /api/products/:id/restock
 const restockProduct = asyncHandler(async (req, res) => {
-  const { quantity, batchNumber, expiryDate } = req.body;
+  const { quantity, batchNumber, expiryDate, imageUrl } = req.body;
 
   if (!quantity || quantity <= 0) {
     return res.status(400).json({ success: false, message: 'Valid quantity is required' });
@@ -183,8 +184,15 @@ const restockProduct = asyncHandler(async (req, res) => {
   }
 
   const updateData = { $inc: { quantity } };
-  if (batchNumber) updateData.batchNumber = batchNumber;
-  if (expiryDate) updateData.expiryDate = new Date(expiryDate);
+  const setData = {};
+
+  if (batchNumber) setData.batchNumber = batchNumber;
+  if (expiryDate) setData.expiryDate = new Date(expiryDate);
+  if (hasOwn(req.body, 'imageUrl')) setData.imageUrl = imageUrl || '';
+
+  if (Object.keys(setData).length) {
+    updateData.$set = setData;
+  }
 
   const updated = await Product.findByIdAndUpdate(req.params.id, updateData, { new: true });
 
